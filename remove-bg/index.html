@@ -95,26 +95,12 @@
       let originalImage = null; // ImageBitmap or HTMLImageElement
       let originalFile = null;
       let picking = false;
-      let bgColor = null; // [r,g,b]
+      let bgColor = null; // [r,g,b]\n      let saveURL = null; // objectURL for PNG download
 
       const octx = orig.getContext('2d');
       const xctx = out.getContext('2d');
 
-      function enableSave(on){
-        if(on){
-          saveBtn.removeAttribute('aria-disabled');
-          saveBtn.style.pointerEvents = 'auto';
-          saveBtn.style.opacity = '1';
-        }else{
-          saveBtn.setAttribute('aria-disabled','true');
-          saveBtn.style.pointerEvents = 'none';
-          saveBtn.style.opacity = '.6';
-          saveBtn.removeAttribute('href');
-          saveBtn.removeAttribute('download');
-        }
-      }
-
-      function fmtBytes(b){ if(!Number.isFinite(b)) return '-'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; } return (Math.round(b*10)/10)+' '+u[i]; }
+            function revokeURL(u){ try{ u && URL.revokeObjectURL(u); }catch(e){} }\n\n      function fmtBytes(b){ if(!Number.isFinite(b)) return '-'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; } return (Math.round(b*10)/10)+' '+u[i]; }
 
       function setSwatch([r,g,b]){
         swatchColor.style.background = `rgb(${r},${g},${b})`;
@@ -200,21 +186,14 @@
         xctx.putImageData(dst,0,0);
 
         // Update save link
-        out.toBlob((blob)=>{
-          if(!blob) return;
-          const url = URL.createObjectURL(blob);
-          const name = originalFile ? originalFile.name.replace(/\.[^.]+$/, '') : 'image';
-          saveBtn.href = url;
-          saveBtn.download = name + '-nobg.png';
-          enableSave(true);
-        }, 'image/png');
+        out.toBlob((blob)=>{\n          if(!blob) return;\n          if(saveURL){ revokeURL(saveURL); saveURL = null; }\n          const url = URL.createObjectURL(blob);\n          saveURL = url;\n          const name = originalFile ? originalFile.name.replace(/\\.[^.]+$/, '') : 'image';\n          saveBtn.href = url;\n          saveBtn.download = name + '-nobg.png';\n          enableSave(true);\n        }, 'image/png');
       }
 
       function reset(){
         originalImage = null; originalFile=null; bgColor=null; setSwatch([0,0,0]);
         octx.clearRect(0,0,orig.width,orig.height);
         xctx.clearRect(0,0,out.width,out.height);
-        enableSave(false);
+        enableSave(false); if(saveURL){ revokeURL(saveURL); saveURL=null; }
         resetBtn.disabled = true; info.textContent='未选择图片';
       }
 
