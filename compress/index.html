@@ -5,21 +5,190 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>图片压缩 · 图片工具箱</title>
   <link rel="stylesheet" href="../assets/styles.css" />
+  <style>
+    /* Page-specific light styles to complement assets/styles.css */
+    .uploader{border:1px dashed #2b4069;border-radius:12px;padding:16px;display:flex;gap:12px;align-items:center;justify-content:space-between;background:#0b1220}
+    .uploader .hint{color:var(--sub)}
+    .row{display:grid;gap:18px;grid-template-columns:1fr 1fr}
+    .controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+    .range{display:flex;align-items:center;gap:10px}
+    .range input[type=range]{width:220px}
+    .meta{color:var(--sub);font-size:13px}
+    .preview{width:100%;display:flex;align-items:center;justify-content:center;min-height:280px;background:#0b1220;border-radius:10px;overflow:hidden}
+    .preview img{max-width:100%;max-height:520px;display:block}
+    @media (max-width:860px){.row{grid-template-columns:1fr}}
+  </style>
 </head>
 <body>
   <div class="container">
     <header class="header">
       <div class="brand">
-        <div class="logo"></div>
+        <div class="logo" aria-hidden="true"></div>
         <div class="title">图片压缩</div>
       </div>
       <nav class="nav"><a href="../">返回首页</a></nav>
     </header>
 
     <div class="card">
-      <h3>功能开发占位</h3>
-      <p>这里将接入前端压缩（如 canvas/wasm），或调用后端服务。</p>
+      <div class="uploader">
+        <div>
+          <input id="file" type="file" accept="image/*" style="display:none" />
+          <button class="btn primary" id="pick">选择图片</button>
+          <div class="hint">支持 JPG / PNG / WebP 等，单张图片</div>
+        </div>
+        <div class="range">
+          <label for="quality">压缩比例</label>
+          <input id="quality" type="range" min="10" max="100" step="1" value="80" />
+          <span id="qText">80%</span>
+        </div>
+      </div>
+      <div class="controls" style="margin-top:12px">
+        <a class="btn" id="save" aria-disabled="true" style="pointer-events:none;opacity:.6">保存压缩后图片</a>
+        <button class="btn" id="reset" disabled>重置</button>
+        <div class="meta" id="info">未选择图片</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <span class="badge">原图</span>
+        <div class="preview"><img id="orig" alt="原图预览" /></div>
+      </div>
+      <div class="card">
+        <span class="badge">压缩预览</span>
+        <div class="preview"><img id="out" alt="压缩后预览" /></div>
+      </div>
     </div>
   </div>
+
+  <script>
+    (function(){
+      // Elements
+      const $ = (id)=>document.getElementById(id);
+      const fileInput = $("file");
+      const pickBtn = $("pick");
+      const saveBtn = $("save");
+      const resetBtn = $("reset");
+      const qualityRange = $("quality");
+      const qText = $("qText");
+      const info = $("info");
+      const origImg = $("orig");
+      const outImg = $("out");
+
+      // State
+      let originalFile = null;
+      let originalURL = null;
+      let outputBlob = null;
+      let outputURL = null;
+      let outputType = null; // mime
+
+      // Helpers
+      function revoke(url){ try{ url && URL.revokeObjectURL(url); }catch(e){} }
+      function fmtBytes(b){ if(!Number.isFinite(b)) return '-'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; } return (Math.round(b*10)/10)+' '+u[i]; }
+      function enableSave(on){
+        if(on){
+          saveBtn.removeAttribute('aria-disabled');
+          saveBtn.style.pointerEvents = 'auto';
+          saveBtn.style.opacity = '1';
+        }else{
+          saveBtn.setAttribute('aria-disabled','true');
+          saveBtn.style.pointerEvents = 'none';
+          saveBtn.style.opacity = '.6';
+          saveBtn.removeAttribute('href');
+          saveBtn.removeAttribute('download');
+        }
+      }
+
+      function detectWebP(){
+        // Best-effort: toDataURL fallback detection
+        try{ const c=document.createElement('canvas'); return c.toDataURL('image/webp').indexOf('data:image/webp')===0; }catch(e){ return false; }
+      }
+      const webpOK = detectWebP();
+
+      function updateQualityText(){ qText.textContent = qualityRange.value + '%'; }
+
+      async function readImage(file){
+        // Prefer createImageBitmap for performance if available
+        if('createImageBitmap' in window){
+          return await createImageBitmap(file);
+        }
+        // Fallback to HTMLImageElement
+        return await new Promise((resolve,reject)=>{
+          const img = new Image();
+          img.onload = ()=>resolve(img);
+          img.onerror = reject;
+          img.src = URL.createObjectURL(file);
+        });
+      }
+
+      async function compress(){
+        if(!originalFile) return;
+        const q = Math.max(10, Math.min(100, parseInt(qualityRange.value,10)||80)) / 100;
+        // Prefer WebP (keeps透明度), otherwise JPEG
+        outputType = webpOK ? 'image/webp' : 'image/jpeg';
+
+        // Decode
+        const bitmap = await readImage(originalFile);
+        const w = bitmap.width, h = bitmap.height;
+
+        // Draw to canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bitmap, 0, 0, w, h);
+
+        // Encode
+        const blob = await new Promise((resolve,reject)=>{
+          canvas.toBlob(b=> b?resolve(b):reject(new Error('toBlob failed')), outputType, q);
+        });
+
+        // Update preview + download
+        if(outputURL) revoke(outputURL);
+        outputBlob = blob;
+        outputURL = URL.createObjectURL(blob);
+        outImg.src = outputURL;
+
+        const name = originalFile.name.replace(/\.[^.]+$/, '');
+        const ext = outputType==='image/webp' ? 'webp' : 'jpg';
+        saveBtn.download = name + '-q' + Math.round(q*100) + '.' + ext;
+        saveBtn.href = outputURL;
+        enableSave(true);
+
+        // Meta
+        const ratio = (blob.size && originalFile.size) ? Math.round((blob.size / originalFile.size)*100) : null;
+        info.textContent = `原图: ${fmtBytes(originalFile.size)}  →  压缩后: ${fmtBytes(blob.size)}` + (ratio? `  (${ratio}% of original)`: '');
+      }
+
+      function reset(){
+        originalFile = null;
+        if(originalURL){ revoke(originalURL); originalURL=null; }
+        if(outputURL){ revoke(outputURL); outputURL=null; }
+        outputBlob = null;
+        origImg.removeAttribute('src');
+        outImg.removeAttribute('src');
+        enableSave(false);
+        info.textContent = '未选择图片';
+        resetBtn.disabled = true;
+      }
+
+      // Wire events
+      pickBtn.addEventListener('click', ()=> fileInput.click());
+      fileInput.addEventListener('change', async ()=>{
+        if(!fileInput.files || !fileInput.files[0]) return;
+        reset();
+        originalFile = fileInput.files[0];
+        originalURL = URL.createObjectURL(originalFile);
+        origImg.src = originalURL;
+        info.textContent = `原图: ${fmtBytes(originalFile.size)}`;
+        resetBtn.disabled = false;
+        await compress();
+      });
+
+      qualityRange.addEventListener('input', ()=>{ updateQualityText(); if(originalFile) compress(); });
+      resetBtn.addEventListener('click', ()=>{ fileInput.value=''; reset(); });
+
+      updateQualityText();
+    })();
+  </script>
 </body>
 </html>
