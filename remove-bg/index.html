@@ -21,6 +21,7 @@
     .swatch{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid #23314d;border-radius:10px;background:#0b1220}
     .swatch i{width:18px;height:18px;border-radius:4px;border:1px solid #21314f;display:inline-block}
     .hintline{color:var(--sub);font-size:12px}
+    .muted{opacity:.5;pointer-events:none}
   </style>
 </head>
 <body>
@@ -38,25 +39,24 @@
         <div>
           <input id="file" type="file" accept="image/*" style="display:none" />
           <button class="btn primary" id="pick">选择图片</button>
-          <div class="hint">支持 JPG / PNG / WebP，推荐背景较为纯色的图片以获得更佳效果</div>
+          <div class="hint">支持 JPG / PNG / WebP。若选“API”，图片将上传到 remove.bg。</div>
         </div>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <span class="chip active" id="proc-local">本地算法</span>
+          <span class="chip" id="proc-api">remove.bg API</span>
           <span class="chip active" id="mode-auto">自动取色</span>
           <span class="chip" id="mode-pick">手动取色</span>
-          <span class="swatch" id="swatch" title="背景色">
-            <i id="swatchColor"></i>
-            <span id="swatchText">—</span>
-          </span>
+          <span class="swatch" id="swatch" title="背景色"><i id="swatchColor"></i><span id="swatchText">—</span></span>
         </div>
       </div>
       <div class="controls" style="margin-top:12px">
-        <div class="range"><label for="tol">容差</label><input id="tol" type="range" min="5" max="80" step="1" value="28" /><span id="tolText">28</span></div>
-        <div class="range"><label for="soft">羽化</label><input id="soft" type="range" min="0" max="40" step="1" value="8" /><span id="softText">8</span></div>
-        <button class="btn" id="save" aria-disabled="true" style="pointer-events:none;opacity:.6">保存 PNG（透明）</button>
+        <div class="range" id="ctl-tol"><label for="tol">容差</label><input id="tol" type="range" min="5" max="80" step="1" value="28" /><span id="tolText">28</span></div>
+        <div class="range" id="ctl-soft"><label for="soft">羽化</label><input id="soft" type="range" min="0" max="40" step="1" value="8" /><span id="softText">8</span></div>
+        <a class="btn" id="save" aria-disabled="true" style="pointer-events:none;opacity:.6">保存 PNG（透明）</a>
         <button class="btn" id="reset" disabled>重置</button>
         <div class="meta" id="info">未选择图片</div>
       </div>
-      <div class="hintline" id="hint">提示：在“手动取色”模式下，点击左侧画布可拾取背景色</div>
+      <div class="hintline" id="hint">提示：在“手动取色”模式下，点击左侧画布可拾取背景色。</div>
     </div>
 
     <div class="row">
@@ -86,116 +86,101 @@
       const hint = $("hint");
       const orig = $("orig");
       const out = $("out");
+      const procLocal = $("proc-local");
+      const procApi = $("proc-api");
       const modeAuto = $("mode-auto");
       const modePick = $("mode-pick");
       const swatch = $("swatch");
       const swatchColor = $("swatchColor");
       const swatchText = $("swatchText");
+      const ctlTol = $("ctl-tol");
+      const ctlSoft = $("ctl-soft");
 
       let originalImage = null; // ImageBitmap or HTMLImageElement
       let originalFile = null;
       let picking = false;
-      let bgColor = null; // [r,g,b]\n      let saveURL = null; // objectURL for PNG download
+      let bgColor = null; // [r,g,b]
+      let saveURL = null; // objectURL for PNG download
+      let apiMode = false;
 
       const octx = orig.getContext('2d');
       const xctx = out.getContext('2d');
 
-            function revokeURL(u){ try{ u && URL.revokeObjectURL(u); }catch(e){} }\n\n      function fmtBytes(b){ if(!Number.isFinite(b)) return '-'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; } return (Math.round(b*10)/10)+' '+u[i]; }
-
-      function setSwatch([r,g,b]){
-        swatchColor.style.background = `rgb(${r},${g},${b})`;
-        swatchText.textContent = `rgb(${r},${g},${b})`;
-      }
-
-      function setMode(auto){
-        picking = !auto;
-        modeAuto.classList.toggle('active', auto);
-        modePick.classList.toggle('active', !auto);
-        hint.style.opacity = picking ? '1' : '.8';
-      }
-
-      function drawFit(ctx, img){
-        // Resize canvas to image intrinsic size; CSS scales for preview
-        ctx.canvas.width = img.width;
-        ctx.canvas.height = img.height;
-        ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
-        ctx.drawImage(img, 0, 0);
-      }
-
-      async function readImage(file){
-        if('createImageBitmap' in window){
-          return await createImageBitmap(file);
+      function enableSave(on){
+        if(on){
+          saveBtn.removeAttribute('aria-disabled');
+          saveBtn.style.pointerEvents = 'auto';
+          saveBtn.style.opacity = '1';
+        }else{
+          saveBtn.setAttribute('aria-disabled','true');
+          saveBtn.style.pointerEvents = 'none';
+          saveBtn.style.opacity = '.6';
+          saveBtn.removeAttribute('href');
+          saveBtn.removeAttribute('download');
         }
-        return await new Promise((resolve,reject)=>{
-          const img = new Image();
-          img.onload = ()=>resolve(img);
-          img.onerror = reject;
-          img.src = URL.createObjectURL(file);
-        });
+      }
+      function revokeURL(u){ try{ u && URL.revokeObjectURL(u); }catch(e){} }
+      function fmtBytes(b){ if(!Number.isFinite(b)) return '-'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024 && i<u.length-1){ b/=1024; i++; } return (Math.round(b*10)/10)+' '+u[i]; }
+
+      function setSwatch([r,g,b]){ swatchColor.style.background = `rgb(${r},${g},${b})`; swatchText.textContent = `rgb(${r},${g},${b})`; }
+      function setMode(auto){ picking = !auto; modeAuto.classList.toggle('active', auto); modePick.classList.toggle('active', !auto); hint.style.opacity = picking ? '1' : '.8'; }
+      function setProcMode(useAPI){
+        apiMode = !!useAPI;
+        procLocal.classList.toggle('active', !apiMode);
+        procApi.classList.toggle('active', apiMode);
+        // Enable/disable local controls
+        [ctlTol, ctlSoft, modeAuto, modePick, swatch].forEach(el=>{ el.classList.toggle('muted', apiMode); });
+        tol.disabled = apiMode; soft.disabled = apiMode;
+        if(apiMode){ hint.textContent = 'API 模式：调用 remove.bg 云端抠图。请在服务端设置环境变量 REMOVE_BG_KEY。'; }
+        else { hint.textContent = '提示：在“手动取色”模式下，点击左侧画布可拾取背景色。'; }
+        // Re-process if we already have an image
+        if(originalFile){ apiMode ? processAPI() : processLocal(); }
       }
 
-      function sampleAutoBG(){
-        // Sample edges (border of 4px) to estimate background color
-        const w = octx.canvas.width, h = octx.canvas.height;
-        const b = 4;
-        const img = octx.getImageData(0,0,w,h).data;
-        let r=0,g=0,bg=0,c=0;
-        function acc(x,y){ const i=(y*w+x)*4; r+=img[i]; g+=img[i+1]; bg+=img[i+2]; c++; }
-        for(let x=0;x<w;x++){ for(let y=0;y<4;y++){ acc(x,y); acc(x,h-1-y);} }
-        for(let y=4;y<h-4;y++){ for(let x=0;x<4;x++){ acc(x,y); acc(w-1-x,y);} }
-        if(c>0){ return [Math.round(r/c),Math.round(g/c),Math.round(bg/c)]; }
-        return [255,255,255];
-      }
+      function drawFit(ctx, img){ ctx.canvas.width = img.width; ctx.canvas.height = img.height; ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height); ctx.drawImage(img, 0, 0); }
 
+      async function readImage(file){ if('createImageBitmap' in window){ return await createImageBitmap(file); } return await new Promise((resolve,reject)=>{ const img = new Image(); img.onload = ()=>resolve(img); img.onerror = reject; img.src = URL.createObjectURL(file); }); }
+
+      function sampleAutoBG(){ const w = octx.canvas.width, h = octx.canvas.height; const img = octx.getImageData(0,0,w,h).data; let r=0,g=0,bg=0,c=0; function acc(x,y){ const i=(y*w+x)*4; r+=img[i]; g+=img[i+1]; bg+=img[i+2]; c++; } for(let x=0;x<w;x++){ for(let y=0;y<4;y++){ acc(x,y); acc(x,h-1-y);} } for(let y=4;y<h-4;y++){ for(let x=0;x<4;x++){ acc(x,y); acc(w-1-x,y);} } return c>0?[Math.round(r/c),Math.round(g/c),Math.round(bg/c)]:[255,255,255]; }
       function distanceRGB(a,b){ const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2]; return Math.sqrt(dr*dr+dg*dg+db*db); }
+      function smoothstep(edge0, edge1, x){ const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0 + 1e-6))); return t*t*(3-2*t); }
 
-      function smoothstep(edge0, edge1, x){
-        const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0 + 1e-6)));
-        return t*t*(3-2*t);
-      }
-
-      function process(){
+      function processLocal(){
         if(!originalImage) return;
         drawFit(octx, originalImage);
-        // Determine bg color
-        if(!bgColor || modeAuto.classList.contains('active')){
-          bgColor = sampleAutoBG();
-          setSwatch(bgColor);
-        }
-
-        const w = octx.canvas.width, h = octx.canvas.height;
-        const src = octx.getImageData(0,0,w,h);
-        const dst = xctx.createImageData(w,h);
-        const sData = src.data, dData = dst.data;
-
-        const tolVal = parseInt(tol.value,10); // 5..80
-        const softVal = parseInt(soft.value,10); // 0..40
-        const maxD = Math.sqrt(255*255*3); // ~441.7
-        const T = tolVal/100 * maxD;
-        const S = softVal/100 * maxD;
-
-        for(let i=0;i<sData.length;i+=4){
-          const r=sData[i], g=sData[i+1], b=sData[i+2];
-          const a=sData[i+3]/255;
-          const d = distanceRGB([r,g,b], bgColor);
-          // alpha keep amount: near bg -> 0, far from bg -> 1
-          const t = smoothstep(T - S, T + S, d);
-          const outA = Math.max(0, Math.min(1, a * t));
-          dData[i] = r; dData[i+1]=g; dData[i+2]=b; dData[i+3] = Math.round(outA*255);
-        }
+        if(!bgColor || modeAuto.classList.contains('active')){ bgColor = sampleAutoBG(); setSwatch(bgColor); }
+        const w=octx.canvas.width, h=octx.canvas.height; const src=octx.getImageData(0,0,w,h); const dst=xctx.createImageData(w,h); const s=src.data, d=dst.data;
+        const tolVal=parseInt(tol.value,10), softVal=parseInt(soft.value,10), maxD=Math.sqrt(255*255*3), T=tolVal/100*maxD, S=softVal/100*maxD;
+        for(let i=0;i<s.length;i+=4){ const r=s[i],g=s[i+1],b=s[i+2], a=s[i+3]/255; const dist=distanceRGB([r,g,b], bgColor); const t=smoothstep(T-S, T+S, dist); const outA=Math.max(0,Math.min(1,a*t)); d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=Math.round(outA*255); }
         xctx.putImageData(dst,0,0);
-
-        // Update save link
-        out.toBlob((blob)=>{\n          if(!blob) return;\n          if(saveURL){ revokeURL(saveURL); saveURL = null; }\n          const url = URL.createObjectURL(blob);\n          saveURL = url;\n          const name = originalFile ? originalFile.name.replace(/\\.[^.]+$/, '') : 'image';\n          saveBtn.href = url;\n          saveBtn.download = name + '-nobg.png';\n          enableSave(true);\n        }, 'image/png');
+        out.toBlob((blob)=>{ if(!blob) return; if(saveURL){ revokeURL(saveURL); saveURL=null; } const url=URL.createObjectURL(blob); saveURL=url; const name=originalFile?originalFile.name.replace(/\.[^.]+$/, ''):'image'; saveBtn.href=url; saveBtn.download=name+'-nobg.png'; enableSave(true); }, 'image/png');
       }
 
-      function reset(){
-        originalImage = null; originalFile=null; bgColor=null; setSwatch([0,0,0]);
-        octx.clearRect(0,0,orig.width,orig.height);
-        xctx.clearRect(0,0,out.width,out.height);
-        enableSave(false); if(saveURL){ revokeURL(saveURL); saveURL=null; }
-        resetBtn.disabled = true; info.textContent='未选择图片';
+      async function processAPI(){
+        if(!originalFile) return;
+        drawFit(octx, originalImage);
+        enableSave(false);
+        info.textContent = '正在调用 remove.bg API...';
+        const fd = new FormData();
+        fd.append('image_file', originalFile);
+        fd.append('size', 'auto');
+        try{
+          const resp = await fetch('/api/remove-bg', { method:'POST', body: fd });
+          if(!resp.ok){ const txt = await resp.text(); throw new Error('API ' + resp.status + ' ' + txt); }
+          const blob = await resp.blob();
+          const bm = ('createImageBitmap' in window)? await createImageBitmap(blob) : await new Promise((resolve,reject)=>{ const img=new Image(); img.onload=()=>resolve(img); img.onerror=reject; img.src=URL.createObjectURL(blob); });
+          drawFit(xctx, bm);
+          if(saveURL){ revokeURL(saveURL); saveURL=null; }
+          saveURL = URL.createObjectURL(blob);
+          const name=originalFile?originalFile.name.replace(/\.[^.]+$/, ''):'image';
+          saveBtn.href = saveURL;
+          saveBtn.download = name + '-nobg.png';
+          enableSave(true);
+          info.textContent = 'remove.bg 完成';
+        }catch(e){ info.textContent = 'API 调用失败：' + (e && e.message || e); }
       }
+
+      function reset(){ originalImage=null; originalFile=null; bgColor=null; setSwatch([0,0,0]); octx.clearRect(0,0,orig.width,orig.height); xctx.clearRect(0,0,out.width,out.height); enableSave(false); if(saveURL){ revokeURL(saveURL); saveURL=null; } resetBtn.disabled = true; info.textContent='未选择图片'; }
 
       // Events
       pickBtn.addEventListener('click', ()=> fileInput.click());
@@ -206,14 +191,16 @@
         originalImage = await readImage(originalFile);
         info.textContent = `原图体积: ${fmtBytes(originalFile.size)}`;
         resetBtn.disabled = false;
-        process();
+        apiMode ? processAPI() : processLocal();
       });
 
-      modeAuto.addEventListener('click', ()=>{ setMode(true); process(); });
-      modePick.addEventListener('click', ()=>{ setMode(false); });
+      procLocal.addEventListener('click', ()=> setProcMode(false));
+      procApi.addEventListener('click', ()=> setProcMode(true));
+      modeAuto.addEventListener('click', ()=>{ if(apiMode) return; setMode(true); processLocal(); });
+      modePick.addEventListener('click', ()=>{ if(apiMode) return; setMode(false); });
 
       orig.addEventListener('click', (ev)=>{
-        if(!picking || !originalImage) return;
+        if(!picking || !originalImage || apiMode) return;
         const rect = orig.getBoundingClientRect();
         const scaleX = orig.width / rect.width;
         const scaleY = orig.height / rect.height;
@@ -222,15 +209,15 @@
         const data = octx.getImageData(x,y,1,1).data;
         bgColor = [data[0],data[1],data[2]];
         setSwatch(bgColor);
-        process();
+        processLocal();
       });
 
-      tol.addEventListener('input', ()=>{ tolText.textContent = tol.value; process(); });
-      soft.addEventListener('input', ()=>{ softText.textContent = soft.value; process(); });
+      tol.addEventListener('input', ()=>{ tolText.textContent = tol.value; if(!apiMode) processLocal(); });
+      soft.addEventListener('input', ()=>{ softText.textContent = soft.value; if(!apiMode) processLocal(); });
       resetBtn.addEventListener('click', ()=>{ fileInput.value=''; reset(); });
 
       // init
-      tolText.textContent = tol.value; softText.textContent = soft.value; setMode(true);
+      tolText.textContent = tol.value; softText.textContent = soft.value; setMode(true); setProcMode(false);
     })();
   </script>
 </body>
