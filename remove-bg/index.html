@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="../assets/styles.css" />
   <style>
     .two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-    .drop{border:1px dashed #2b4069;border-radius:12px;padding:18px;text-align:center;color:#94a3b8}
+    .drop{border:1px dashed #2b4069;border-radius:12px;padding:18px;text-align:center;color:#94a3b8;cursor:pointer}
     .preview{background:repeating-conic-gradient(#111827 0% 25%,#0b1220 0% 50%) 50%/20px 20px;border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:center;min-height:300px}
     .preview img{max-width:100%;max-height:520px;display:block}
     .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -28,6 +28,7 @@
       <div class="card">
         <h3>上传图片</h3>
         <div class="drop" id="drop">拖拽图片到此或点击选择</div>
+        <button id="pick" class="btn" style="margin-top:8px">选择文件</button>
         <input id="file" type="file" accept="image/*" style="display:none" />
         <div class="row" style="margin-top:12px">
           <label>输出尺寸</label>
@@ -39,14 +40,22 @@
             <option value="hd">hd</option>
             <option value="4k">4k</option>
           </select>
+          <label>背景</label>
+          <select id="bg-mode" class="btn">
+            <option value="transparent" selected>透明</option>
+            <option value="color">纯色</option>
+            <option value="image">图片URL</option>
+          </select>
+          <input id="bg-color" type="color" value="#ffffff" style="display:none" />
+          <input id="bg-url" class="btn" type="url" placeholder="https://example.com/bg.png" style="display:none; min-width: 260px" />
           <button class="btn primary" id="run">去背景</button>
         </div>
-        <div class="small">通过本地代理安全调用 remove.bg API，密钥不会暴露到浏览器。</div>
+        <div class="small">通过后端转发调用 remove.bg API，前端不会暴露 API Key。单图 ≤ 25MB。</div>
       </div>
 
       <div class="card">
-        <h3>结果预览</h3>
-        <div class="preview" id="preview"><span class="small">暂无结果</span></div>
+        <h3>预览</h3>
+        <div class="preview" id="preview"><span class="small">未选择图片</span></div>
         <div class="row" style="margin-top:8px">
           <a id="download" class="btn" href="#" download="no-bg.png" style="display:none">下载 PNG</a>
         </div>
@@ -55,54 +64,123 @@
   </div>
 
 <script>
-const $ = (s) => document.querySelector(s);
-const fileInput = $('#file');
-const drop = $('#drop');
-const runBtn = $('#run');
-const preview = $('#preview');
-const sizeSel = $('#size');
-const download = $('#download');
+(function(){
+  const $ = (s) => document.querySelector(s);
+  const fileInput = $('#file');
+  const drop = $('#drop');
+  const pickBtn = $('#pick');
+  const runBtn = $('#run');
+  const preview = $('#preview');
+  const sizeSel = $('#size');
+  const download = $('#download');
+  const bgMode = document.querySelector('#bg-mode');
+  const bgColor = document.querySelector('#bg-color');
+  const bgUrl = document.querySelector('#bg-url');
 
-function setPreview(imgBlob){
-  preview.innerHTML = '';
-  const img = document.createElement('img');
-  img.src = URL.createObjectURL(imgBlob);
-  preview.appendChild(img);
-  download.style.display='inline-block';
-  download.href = img.src;
-}
+  let originalURL = null; // objectURL for original preview
+  let resultURL = null;   // objectURL for result image
+  let currentFile = null; // selected File
 
-function pickFile(){ fileInput.click(); }
+  function revoke(url){ try{ if(url) URL.revokeObjectURL(url); }catch(_){} }
 
-drop.addEventListener('click', pickFile);
-
-drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.style.background='#0b1220';});
-drop.addEventListener('dragleave', ()=>{ drop.style.background='transparent';});
-drop.addEventListener('drop', (e)=>{ e.preventDefault(); drop.style.background='transparent'; if(e.dataTransfer.files?.length){ fileInput.files = e.dataTransfer.files; drop.textContent = e.dataTransfer.files[0].name; }});
-
-fileInput.addEventListener('change', ()=>{ if(fileInput.files?.[0]) drop.textContent = fileInput.files[0].name; });
-
-runBtn.addEventListener('click', async ()=>{
-  const f = fileInput.files?.[0];
-  if(!f){ alert('请先选择图片'); return; }
-  runBtn.disabled = true; runBtn.textContent = '处理中...';
-  try{
-    const fd = new FormData();
-    fd.append('image_file', f);
-    fd.append('size', sizeSel.value || 'auto');
-    const resp = await fetch('/api/remove-bg', { method:'POST', body: fd });
-    if(!resp.ok){
-      const err = await resp.json().catch(()=>({}));
-      throw new Error(err.detail || err.error || ('HTTP '+resp.status));
-    }
-    const blob = await resp.blob();
-    setPreview(blob);
-  }catch(err){
-    alert('处理失败：'+err.message);
-  }finally{
-    runBtn.disabled = false; runBtn.textContent = '去背景';
+  function setPreviewWithURL(url){
+    preview.innerHTML = '';
+    const img = document.createElement('img');
+    img.onload = ()=>{};
+    img.onerror = ()=>{ /* 某些格式浏览器不预览，但不影响上传处理 */ };
+    img.src = url;
+    preview.appendChild(img);
   }
-});
+
+  function setResultPreview(blob){
+    if(resultURL) revoke(resultURL);
+    resultURL = URL.createObjectURL(blob);
+    setPreviewWithURL(resultURL);
+    download.style.display = 'inline-block';
+    download.href = resultURL;
+    const base = currentFile ? (currentFile.name.replace(/\.[^.]+$/, '')) : 'no-bg';
+    const ct = blob.type || 'image/png';
+    const ext = ct.includes('webp') ? 'webp' : (ct.includes('jpeg') ? 'jpg' : 'png');
+    download.download = base + '-no-bg.' + ext;
+  }
+
+  function syncBgInputs(){
+    const mode = bgMode.value;
+    bgColor.style.display = mode === 'color' ? '' : 'none';
+    bgUrl.style.display = mode === 'image' ? '' : 'none';
+  }
+
+  function pickFile(){ fileInput.click(); }
+
+  // events
+  drop.addEventListener('click', pickFile);
+  if(pickBtn) pickBtn.addEventListener('click', pickFile);
+  drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.style.background='#0b1220'; });
+  drop.addEventListener('dragleave', ()=>{ drop.style.background='transparent'; });
+  drop.addEventListener('drop', (e)=>{
+    e.preventDefault();
+    drop.style.background='transparent';
+    if(e.dataTransfer.files && e.dataTransfer.files[0]){
+      fileInput.files = e.dataTransfer.files;
+      handleFileSelected();
+    } else {
+      alert('请拖拽具体图片文件（不支持文件夹）');
+    }
+  });
+
+  function isLikelyImageExt(name){ return /\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif)$/i.test(name||''); }
+
+  function handleFileSelected(){
+    const f = fileInput.files && fileInput.files[0];
+    if(!f){ return; }
+    if(!((f.type||'').startsWith('image/') || isLikelyImageExt(f.name))){ alert('请选择图片文件'); fileInput.value=''; return; }
+    const max = 25 * 1024 * 1024;
+    if(f.size > max){ alert('图片大于 25MB，无法处理'); fileInput.value=''; return; }
+    currentFile = f;
+    drop.textContent = f.name;
+    if(originalURL) revoke(originalURL);
+    originalURL = URL.createObjectURL(f);
+    setPreviewWithURL(originalURL);
+    download.style.display='none';
+  }
+
+  fileInput.addEventListener('change', handleFileSelected);
+  bgMode.addEventListener('change', syncBgInputs);
+  syncBgInputs();
+
+  runBtn.addEventListener('click', async ()=>{
+    const f = fileInput.files && fileInput.files[0];
+    if(!f){ alert('请先选择图片'); return; }
+    if(bgMode.value === 'image'){
+      const u = (bgUrl.value||'').trim();
+      if(!/^https?:\/\//i.test(u)){
+        alert('背景图片URL需以 http:// 或 https:// 开头');
+        return;
+      }
+    }
+    runBtn.disabled = true; const oldText = runBtn.textContent; runBtn.textContent = '处理中…';
+    try{
+      const fd = new FormData();
+      fd.append('image_file', f);
+      fd.append('size', sizeSel.value || 'auto');
+      const mode = bgMode.value;
+      if(mode === 'color' && bgColor.value){ fd.append('bg_color', (bgColor.value||'').replace('#','')); }
+      if(mode === 'image' && bgUrl.value.trim()){ fd.append('bg_image_url', bgUrl.value.trim()); }
+
+      const resp = await fetch('/api/remove-bg', { method:'POST', body: fd });
+      if(!resp.ok){
+        const err = await resp.json().catch(()=>({}));
+        throw new Error(err.detail || err.error || ('HTTP '+resp.status));
+      }
+      const blob = await resp.blob();
+      setResultPreview(blob);
+    }catch(err){
+      alert('处理失败：'+ (err && err.message || err));
+    }finally{
+      runBtn.disabled = false; runBtn.textContent = oldText;
+    }
+  });
+})();
 </script>
 </body>
 </html>
