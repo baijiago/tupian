@@ -1,6 +1,8 @@
-﻿{
-  "routes": [
-    { "src": "/api/generate", "dest": "/api/generate.js" },
-    { "src": "/api/ping", "dest": "/api/ping.js" }
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/api/generate", "destination": "/api/generate.js" },
+    { "source": "/api/ping", "destination": "/api/ping.js" }
   ]
 }
+
