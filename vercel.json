@@ -1,8 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/api/generate", "destination": "/api/generate.js" },
-    { "source": "/api/ping", "destination": "/api/ping.js" }
+    {
+      "source": "/api/generate",
+      "destination": "/api/generate.js"
+    },
+    {
+      "source": "/api/ping",
+      "destination": "/api/ping.js"
+    },
+    {
+      "destination": "/api/remove-bg.js",
+      "source": "/api/remove-bg"
+    }
   ]
 }
-
