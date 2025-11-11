@@ -5,7 +5,28 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>AI 生图 · 图片工具箱</title>
   <link rel="stylesheet" href="../assets/styles.css" />
-</head>
+  <style>
+    .two-col{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    textarea{width:100%;min-height:92px;resize:vertical;background:#0b1220;color:#e5e7eb;border:1px solid #23314d;border-radius:10px;padding:10px}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+    .thumb{background:#0b1220;border:1px solid #21314f;border-radius:10px;padding:8px;display:flex;align-items:center;justify-content:center;min-height:180px}
+    .thumb img{max-width:100%;max-height:320px;display:block}
+    .small{font-size:12px;color:#94a3b8}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .chip{font-size:12px;border:1px solid #23314d;border-radius:999px;padding:4px 8px;background:#0b1220;color:#94a3b8;cursor:pointer}
+    .chip:hover{color:#e5e7eb;border-color:#2b4069}
+    @media (max-width:860px){.two-col{grid-template-columns:1fr}}
+  </style>
+  <meta name="description" content="输入提示词，经后端代理调用火山引擎 Ark 生图 API，生成图片并展示原始响应。" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <script>
+  // 小工具：字节数格式化
+  function fmtBytes(b){ if(!Number.isFinite(b)) return '-'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return (Math.round(b*10)/10)+' '+u[i]; }
+  </script>
+  </head>
 <body>
   <div class="container">
     <header class="header">
@@ -16,10 +37,178 @@
       <nav class="nav"><a href="../">返回首页</a></nav>
     </header>
 
-    <div class="card">
-      <h3>功能开发占位</h3>
-      <p>后续可接入本地/云端 Stable Diffusion、Flux、SDXL 或文生图 API。</p>
+    <div class="two-col">
+      <div class="card">
+        <span class="badge">输入</span>
+        <label for="prompt" class="small">提示词</label>
+        <textarea id="prompt" placeholder="例如：赛博朋克风格的夜晚街道，霓虹灯反射在雨后的地面上，细节丰富，电影级质感"></textarea>
+        <div class="chips" id="examples"></div>
+
+        <div class="row" style="margin-top:10px">
+          <label>尺寸</label>
+          <select id="size" class="btn">
+            <option value="512x512">512×512</option>
+            <option value="768x768">768×768</option>
+            <option value="1024x1024">1024×1024</option>
+            <option value="768x1024">768×1024</option>
+            <option value="1024x768">1024×768</option>
+            <option value="2K" selected>2K</option>
+          </select>
+          <label>张数</label>
+          <select id="count" class="btn">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+          <input id="model" class="btn" placeholder="模型 ID（可留空：仅当需要指定）" style="min-width:260px" />
+          <button id="run" class="btn primary">生成</button>
+        </div>
+        <div class="row small" style="margin-top:6px">
+          <label for="format">响应格式</label>
+          <select id="format" class="btn">
+            <option value="url" selected>url</option>
+            <option value="b64_json">b64_json</option>
+          </select>
+          <label for="seq">序列生图</label>
+          <select id="seq" class="btn">
+            <option value="disabled" selected>disabled</option>
+            <option value="enabled">enabled</option>
+            <option value="auto">auto</option>
+          </select>
+          <label class="btn" style="display:flex;gap:6px;align-items:center">
+            <input id="watermark" type="checkbox" checked /> 水印
+          </label>
+          <label class="btn" style="display:flex;gap:6px;align-items:center">
+            <input id="stream" type="checkbox" /> 流式
+          </label>
+        </div>
+        <div class="row small" style="margin-top:6px">
+          <label for="neg">负面提示词（可选）</label>
+          <input id="neg" class="btn" placeholder="例如：低质量、模糊、畸形、噪点" style="min-width:320px" />
+        </div>
+        <div class="row small" style="margin-top:6px">
+          <label for="refs">���ο�ͼ URL��ÿ���һ����ѡ��</label>
+          <textarea id="refs" placeholder="https://.../a.png&#10;https://.../b.jpg" style="min-height:70px;width:100%"></textarea>
+        </div>
+        <div class="row small" style="margin-top:6px">
+          <label for="max_images">������ͼ max_images</label>
+          <input id="max_images" class="btn" type="number" min="1" max="6" value="3" style="width:100px" />
+        </div>
+        <div id="err" class="small" style="color:#fca5a5;margin-top:6px;display:none"></div>
+      </div>
+
+      <div class="card">
+        <span class="badge">结果</span>
+        <div id="gallery" class="grid" style="margin-top:8px"></div>
+        <details style="margin-top:8px">
+          <summary class="small">查看原始响应 JSON</summary>
+          <pre id="raw" style="white-space:pre-wrap;word-break:break-word;background:#0b1220;border:1px solid #21314f;border-radius:10px;padding:10px;max-height:400px;overflow:auto"></pre>
+        </details>
+      </div>
     </div>
   </div>
+
+<script>
+(function(){
+  const $ = (s)=>document.querySelector(s);
+  const promptEl = $('#prompt');
+  const sizeEl = $('#size');
+  const countEl = $('#count');
+  const runBtn = $('#run');
+  const gallery = $('#gallery');
+  const rawPre = $('#raw');
+  const errBox = $('#err');
+  const modelEl = $('#model');
+  const negEl = $('#neg');
+  const examplesEl = $('#examples');
+  const fmtSel = $('#format');
+  const seqSel = $('#seq');
+  const watermarkEl = $('#watermark');
+  const streamEl = $('#stream');
+  const refsEl = $('#refs');
+  const maxImagesEl = $('#max_images');
+
+  const EXAMPLES = [
+    '赛博朋克夜景街道，霓虹灯，雨后路面反光，电影质感',
+    '可爱橘猫坐在窗边，阳光照射，油画风格，细节丰富',
+    '白底电商产品图：蓝牙耳机，光影柔和，高对比，高洁净',
+    '日本浮世绘风格的山与海，细线条，版画质感',
+    '科幻飞船穿越行星环，广角构图，体积光'
+  ];
+  EXAMPLES.forEach((t)=>{
+    const chip = document.createElement('span');
+    chip.className = 'chip'; chip.textContent = t;
+    chip.addEventListener('click', ()=>{ promptEl.value = t; });
+    examplesEl.appendChild(chip);
+  });
+
+  function setError(msg){ errBox.textContent = msg||''; errBox.style.display = msg? '' : 'none'; }
+  function setLoading(on){ runBtn.disabled = !!on; runBtn.textContent = on? '生成中…' : '生成'; }
+  function clearOut(){ gallery.innerHTML = ''; rawPre.textContent=''; setError(''); }
+
+  function toAbsDownloadLink(src){
+    // 将 url/b64 统一为可下载的链接；跨域失败则直接使用原链接
+    return (async () => {
+      try{
+        if(!src || typeof src !== 'string') return null;
+        if(src.startsWith('data:')) return src;
+        const r = await fetch(src, { cache: 'no-store', mode: 'cors' });
+        if(!r.ok) return src; // fallback
+        const blob = await r.blob();
+        return URL.createObjectURL(blob);
+      }catch(_){ return src; }
+    })();
+  }
+
+  async function generate(){
+    const prompt = (promptEl.value||'').trim();
+    if(!prompt){ setError('请输入提示词'); return; }
+    setError(''); clearOut(); setLoading(true);
+    try{
+      const body = {
+        prompt,
+        size: sizeEl.value,
+        n: Number(countEl.value)||1,
+        response_format: fmtSel.value,
+        sequential_image_generation: seqSel.value,
+        watermark: !!watermarkEl.checked,
+        stream: !!streamEl.checked,
+      };
+      const m = (modelEl.value||'').trim(); if(m) body.model = m;
+      const neg = (negEl.value||'').trim(); if(neg) body.negative_prompt = neg;
+      // ���ο�ͼ
+      const refsTxt = (refsEl?.value||'').trim();
+      if (refsTxt) {
+        const arr = refsTxt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        if (arr.length) body.image = arr;
+      }
+      // seq options
+      const mx = parseInt((maxImagesEl?.value||'').trim(), 10);
+      if (!Number.isNaN(mx) && mx > 0) {
+        body.sequential_image_generation_options = { max_images: mx };
+      }
+      const resp = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const json = await resp.json().catch(()=>({}));
+      if(!resp.ok){ throw new Error(json.detail || json.error || ('HTTP '+resp.status)); }
+      rawPre.textContent = JSON.stringify(json.raw ?? json, null, 2);
+      const imgs = Array.isArray(json.images)? json.images : [];
+      if(!imgs.length){ setError('生成成功但未返回图片，请检查模型或参数'); return; }
+      imgs.forEach(async (src, idx)=>{
+        const box = document.createElement('div'); box.className='thumb';
+        const img = document.createElement('img'); img.alt = '生成图 '+(idx+1); img.src = src; box.appendChild(img);
+        const a = document.createElement('a'); a.className='btn'; a.textContent='下载'; a.style.marginTop='6px';
+        const dl = await toAbsDownloadLink(src); a.href = dl || src; a.download = `gen-${idx+1}.png`;
+        const wrap = document.createElement('div'); wrap.appendChild(box); wrap.appendChild(a);
+        gallery.appendChild(wrap);
+      });
+    }catch(err){ setError(String(err && err.message || err)); }
+    finally{ setLoading(false); }
+  }
+
+  runBtn.addEventListener('click', generate);
+  promptEl.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ generate(); } });
+})();
+</script>
 </body>
 </html>

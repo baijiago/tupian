@@ -8,3 +8,18 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+.env.local
+
+# python venv
+.venv/
+__pycache__/
+*.pyc
+
+# app logs and temp outputs
+server/*.log
+uvicorn*.log
+
+# local artifacts
+remove-bg/*.png
+
