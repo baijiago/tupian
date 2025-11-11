@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -27,7 +27,7 @@
     <div class="two-col">
       <div class="card">
         <h3>上传图片</h3>
-        <div class="drop" id="drop">拖拽图片到此或点击选择</div>
+        <div class="drop" id="drop">拖拽图片到此处，或点击选择；也支持直接粘贴截图(Ctrl+V)</div>
         <button id="pick" class="btn" style="margin-top:8px">选择文件</button>
         <input id="file" type="file" accept="image/*" style="display:none" />
         <div class="row" style="margin-top:12px">
@@ -145,6 +145,25 @@
   }
 
   fileInput.addEventListener('change', handleFileSelected);
+  // paste from clipboard (image)
+  document.addEventListener('paste', (e) => {
+    try {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const it of items) {
+        if (it && it.type && it.type.startsWith('image/')) {
+          const f = it.getAsFile && it.getAsFile();
+          if (f) {
+            const dt = new DataTransfer();
+            dt.items.add(f);
+            fileInput.files = dt.files;
+            handleFileSelected();
+            e.preventDefault();
+            break;
+          }
+        }
+      }
+    } catch (_) {}
+  });
   bgMode.addEventListener('change', syncBgInputs);
   syncBgInputs();
 

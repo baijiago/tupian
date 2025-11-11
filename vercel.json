@@ -1,6 +1,6 @@
-{
-  ""routes"": [
-    { ""src"": "/api/generate", ""dest"": "/api/generate.js" },
-    { ""src"": "/api/ping", ""dest"": "/api/ping.js" }
+﻿{
+  "routes": [
+    { "src": "/api/generate", "dest": "/api/generate.js" },
+    { "src": "/api/ping", "dest": "/api/ping.js" }
   ]
 }
